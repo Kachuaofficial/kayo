@@ -1,8 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import '../../services/firestore_search_service.dart';
+import '../../services/worker_location_service.dart';
 
 class SearchPage extends StatefulWidget {
   final String? initialQuery;
@@ -15,11 +17,13 @@ class SearchPage extends StatefulWidget {
 
 class _SearchPageState extends State<SearchPage> {
   final FirestoreSearchService _searchService = FirestoreSearchService();
+  final WorkerLocationService _workerLocationService = WorkerLocationService();
   late final TextEditingController _searchController;
   final FocusNode _focusNode = FocusNode();
 
   String _currentQuery = '';
   SearchItemType? _selectedFilter; // null = All
+  Position? _userPosition;
 
   final List<String> _trendingSearches = const [
     'Plumber',
@@ -38,9 +42,19 @@ class _SearchPageState extends State<SearchPage> {
     _currentQuery = widget.initialQuery ?? '';
     _searchController = TextEditingController(text: _currentQuery);
     _searchController.addListener(_onSearchChanged);
+    _fetchLocation();
 
     if (_currentQuery.isNotEmpty) {
       _searchService.addRecentSearch(_currentQuery);
+    }
+  }
+
+  Future<void> _fetchLocation() async {
+    final pos = await _workerLocationService.getUserPosition();
+    if (mounted) {
+      setState(() {
+        _userPosition = pos;
+      });
     }
   }
 
@@ -352,6 +366,8 @@ class _SearchPageState extends State<SearchPage> {
       stream: _searchService.searchLive(
         query: _currentQuery,
         filterType: _selectedFilter,
+        userLat: _userPosition?.latitude,
+        userLng: _userPosition?.longitude,
       ),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -551,22 +567,43 @@ class _SearchPageState extends State<SearchPage> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Avatar
-              CircleAvatar(
-                radius: 26,
-                backgroundColor: colorScheme.primaryContainer,
-                backgroundImage: item.imageUrl != null
-                    ? NetworkImage(item.imageUrl!)
-                    : null,
-                child: item.imageUrl == null
-                    ? Text(
-                        item.title.isNotEmpty ? item.title[0] : 'W',
-                        style: TextStyle(
-                          color: colorScheme.onPrimaryContainer,
-                          fontWeight: FontWeight.bold,
+              // Avatar with Online Badge
+              Stack(
+                children: [
+                  CircleAvatar(
+                    radius: 26,
+                    backgroundColor: colorScheme.primaryContainer,
+                    backgroundImage: item.imageUrl != null
+                        ? NetworkImage(item.imageUrl!)
+                        : null,
+                    child: item.imageUrl == null
+                        ? Text(
+                            item.title.isNotEmpty ? item.title[0] : 'W',
+                            style: TextStyle(
+                              color: colorScheme.onPrimaryContainer,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          )
+                        : null,
+                  ),
+                  if (item.isOnline)
+                    Positioned(
+                      bottom: 0,
+                      right: 0,
+                      child: Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: Colors.green,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: colorScheme.surface,
+                            width: 2,
+                          ),
                         ),
-                      )
-                    : null,
+                      ),
+                    ),
+                ],
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -625,6 +662,36 @@ class _SearchPageState extends State<SearchPage> {
                     const SizedBox(height: 6),
                     Row(
                       children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.location_on_rounded,
+                                size: 12,
+                                color: colorScheme.primary,
+                              ),
+                              const SizedBox(width: 2),
+                              Text(
+                                item.formattedDistance,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: colorScheme.onSurface,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
                         Icon(
                           Icons.work_outline_rounded,
                           size: 13,
@@ -632,24 +699,19 @@ class _SearchPageState extends State<SearchPage> {
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          '$totalJobs jobs done',
+                          '$totalJobs jobs',
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: colorScheme.onSurfaceVariant,
                             fontSize: 11,
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        Icon(
-                          Icons.currency_rupee_rounded,
-                          size: 13,
-                          color: colorScheme.onSurfaceVariant,
-                        ),
+                        const Spacer(),
                         Text(
-                          '$hourlyRate/hr',
+                          '₹$hourlyRate/hr',
                           style: theme.textTheme.bodySmall?.copyWith(
-                            color: colorScheme.onSurfaceVariant,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 11,
+                            color: colorScheme.primary,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12,
                           ),
                         ),
                       ],
@@ -767,6 +829,17 @@ class _SearchResultDetailSheet extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
+                    if (isWorker) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        '• ${item.formattedDistance}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -874,7 +947,6 @@ class _SearchResultDetailSheet extends StatelessWidget {
     }
 
     try {
-      // Create quick booking document in Firestore
       final bookingRef = await FirebaseFirestore.instance.collection('bookings').add({
         'customerId': user.uid,
         'customerName': user.displayName ?? 'Customer',

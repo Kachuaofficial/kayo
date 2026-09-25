@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 
 /// Type of search result item
 enum SearchItemType {
@@ -22,6 +23,8 @@ class SearchResultItem {
   final int? price;
   final String? category;
   final List<String> tags;
+  final bool isOnline;
+  final double? distanceInKm;
   final Map<String, dynamic> rawData;
 
   const SearchResultItem({
@@ -37,8 +40,19 @@ class SearchResultItem {
     this.price,
     this.category,
     this.tags = const [],
+    this.isOnline = true,
+    this.distanceInKm,
     this.rawData = const {},
   });
+
+  String get formattedDistance {
+    if (distanceInKm == null) return 'Nearby';
+    if (distanceInKm! < 1.0) {
+      final meters = (distanceInKm! * 1000).round();
+      return '$meters m away';
+    }
+    return '${distanceInKm!.toStringAsFixed(1)} km away';
+  }
 
   IconData get icon {
     switch (iconName) {
@@ -95,25 +109,87 @@ class SearchResultItem {
     );
   }
 
-  factory SearchResultItem.fromWorkerDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
+  factory SearchResultItem.fromWorkerDoc(
+    DocumentSnapshot<Map<String, dynamic>> doc, {
+    double? userLat,
+    double? userLng,
+  }) {
     final data = doc.data() ?? {};
     final skillsRaw = data['skills'];
     final List<String> skills = (skillsRaw is List)
         ? skillsRaw.map((e) => e.toString()).toList()
         : [];
 
+    final name = (data['name'] as String?)?.trim().isNotEmpty == true
+        ? data['name'] as String
+        : ((data['accountHolderName'] as String?)?.trim().isNotEmpty == true
+            ? data['accountHolderName'] as String
+            : 'Worker');
+
+    final profession = (data['profession'] as String?)?.trim().isNotEmpty == true
+        ? data['profession'] as String
+        : ((data['primaryTrade'] as String?)?.trim().isNotEmpty == true
+            ? data['primaryTrade'] as String
+            : 'Professional');
+
+    final photo = (data['profileImage'] as String?)?.trim().isNotEmpty == true
+        ? data['profileImage'] as String
+        : ((data['livePhotoUrl'] as String?)?.trim().isNotEmpty == true
+            ? data['livePhotoUrl'] as String
+            : ((data['avatar'] as String?)?.trim().isNotEmpty == true
+                ? data['avatar'] as String
+                : null));
+
+    bool online = true;
+    if (data.containsKey('isOnline')) {
+      online = data['isOnline'] == true;
+    } else if (data.containsKey('isAvailable')) {
+      online = data['isAvailable'] == true;
+    } else if (data.containsKey('isActive')) {
+      online = data['isActive'] == true;
+    } else if (data.containsKey('status')) {
+      final s = data['status']?.toString().toLowerCase();
+      online = (s == 'online' || s == 'available');
+    }
+
+    // Distance calculation
+    double? lat;
+    double? lng;
+    if (data['location'] is GeoPoint) {
+      final gp = data['location'] as GeoPoint;
+      lat = gp.latitude;
+      lng = gp.longitude;
+    } else if (data['location'] is Map) {
+      final loc = data['location'] as Map;
+      lat = (loc['latitude'] as num?)?.toDouble() ?? (loc['lat'] as num?)?.toDouble();
+      lng = (loc['longitude'] as num?)?.toDouble() ?? (loc['lng'] as num?)?.toDouble();
+    } else {
+      lat = (data['latitude'] as num?)?.toDouble();
+      lng = (data['longitude'] as num?)?.toDouble();
+    }
+
+    double? distanceKm;
+    if (userLat != null && userLng != null && lat != null && lng != null) {
+      final m = Geolocator.distanceBetween(userLat, userLng, lat, lng);
+      distanceKm = m / 1000.0;
+    }
+
     return SearchResultItem(
       id: doc.id,
       type: SearchItemType.worker,
-      title: data['name']?.toString() ?? 'Worker',
-      subtitle: data['profession']?.toString() ?? 'Professional',
+      title: name,
+      subtitle: profession,
       description: data['bio']?.toString() ?? data['about']?.toString() ?? '',
-      imageUrl: data['profileImage']?.toString() ?? data['avatar']?.toString(),
+      imageUrl: photo,
       rating: (data['rating'] as num?)?.toDouble() ?? 4.8,
-      totalJobsOrReviews: (data['totalJobs'] as num?)?.toInt() ?? 0,
-      price: (data['hourlyRate'] as num?)?.toInt(),
-      category: data['profession']?.toString(),
+      totalJobsOrReviews: (data['completedJobs'] as num?)?.toInt() ??
+          ((data['totalJobs'] as num?)?.toInt() ?? 0),
+      price: (data['hourlyRate'] as num?)?.toInt() ??
+          ((data['basePrice'] as num?)?.toInt() ?? 299),
+      category: profession,
       tags: skills,
+      isOnline: online,
+      distanceInKm: distanceKm,
       rawData: data,
     );
   }
@@ -177,19 +253,28 @@ class FirestoreSearchService {
   }
 
   /// Stream of all active workers from Firestore
-  Stream<List<SearchResultItem>> streamWorkers() {
+  Stream<List<SearchResultItem>> streamWorkers({
+    double? userLat,
+    double? userLng,
+  }) {
     return _firestore
         .collection('workers')
-        .where('isActive', isEqualTo: true)
         .snapshots()
-        .map((snapshot) =>
-            snapshot.docs.map((d) => SearchResultItem.fromWorkerDoc(d)).toList());
+        .map((snapshot) => snapshot.docs
+            .map((d) => SearchResultItem.fromWorkerDoc(
+                  d,
+                  userLat: userLat,
+                  userLng: userLng,
+                ))
+            .toList());
   }
 
   /// Combined search stream across services and workers
   Stream<List<SearchResultItem>> searchLive({
     String query = '',
     SearchItemType? filterType,
+    double? userLat,
+    double? userLng,
   }) {
     final cleanQuery = query.trim().toLowerCase();
 
@@ -213,13 +298,14 @@ class FirestoreSearchService {
       // 2. Workers
       if (filterType == null || filterType == SearchItemType.worker) {
         try {
-          final workersSnap = await _firestore
-              .collection('workers')
-              .where('isActive', isEqualTo: true)
-              .get();
+          final workersSnap = await _firestore.collection('workers').get();
 
           for (final doc in workersSnap.docs) {
-            final item = SearchResultItem.fromWorkerDoc(doc);
+            final item = SearchResultItem.fromWorkerDoc(
+              doc,
+              userLat: userLat,
+              userLng: userLng,
+            );
             if (_matchesQuery(item, cleanQuery)) {
               allResults.add(item);
             }
@@ -229,51 +315,6 @@ class FirestoreSearchService {
 
       return allResults;
     });
-  }
-
-  /// One-shot query across services and workers
-  Future<List<SearchResultItem>> searchOnce({
-    required String query,
-    SearchItemType? filterType,
-  }) async {
-    final cleanQuery = query.trim().toLowerCase();
-    final List<SearchResultItem> results = [];
-
-    // Services
-    if (filterType == null || filterType == SearchItemType.service) {
-      try {
-        final snap = await _firestore
-            .collection('services')
-            .where('isActive', isEqualTo: true)
-            .get();
-
-        for (final doc in snap.docs) {
-          final item = SearchResultItem.fromServiceDoc(doc);
-          if (_matchesQuery(item, cleanQuery)) {
-            results.add(item);
-          }
-        }
-      } catch (_) {}
-    }
-
-    // Workers
-    if (filterType == null || filterType == SearchItemType.worker) {
-      try {
-        final snap = await _firestore
-            .collection('workers')
-            .where('isActive', isEqualTo: true)
-            .get();
-
-        for (final doc in snap.docs) {
-          final item = SearchResultItem.fromWorkerDoc(doc);
-          if (_matchesQuery(item, cleanQuery)) {
-            results.add(item);
-          }
-        }
-      } catch (_) {}
-    }
-
-    return results;
   }
 
   bool _matchesQuery(SearchResultItem item, String cleanQuery) {

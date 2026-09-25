@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:kayo/widgets/home_banner.dart';
 import 'package:kayo/widgets/home_search.dart';
 import 'package:kayo/widgets/home_services.dart';
+import 'package:kayo/widgets/nearby_workers.dart';
 
 import '../../services/location_service.dart';
 import '../../widgets/home_header.dart';
@@ -105,11 +106,10 @@ class _HomePageState extends State<HomePage> {
                 onLocationTap: _handleLocationTap,
               ),
 
-              HomeSearch(),
-              HomeBanner(),
-              HomeServices(),
-              // NearbyWorkers(),
-              // RecentBookings(),
+              const HomeSearch(),
+              const HomeBanner(),
+              const HomeServices(),
+              const NearbyWorkers(),
             ],
           ),
         ),

@@ -1,8 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
-import '../../services/firestore_search_service.dart';
+import '../../models/worker_model.dart';
+import '../../services/worker_location_service.dart';
 
 class ExplorePage extends StatefulWidget {
   const ExplorePage({super.key});
@@ -13,17 +15,32 @@ class ExplorePage extends StatefulWidget {
 
 class _ExplorePageState extends State<ExplorePage> {
   final TextEditingController _searchController = TextEditingController();
+  final WorkerLocationService _workerLocationService = WorkerLocationService();
+
   String _searchQuery = '';
   String? _selectedCategory; // null = all
+  Position? _currentPosition;
+  double _selectedRadiusKm = WorkerLocationService.defaultRadiusKm;
+  bool _onlyOnline = true;
 
   @override
   void initState() {
     super.initState();
+    _fetchUserLocation();
     _searchController.addListener(() {
       setState(() {
         _searchQuery = _searchController.text.trim().toLowerCase();
       });
     });
+  }
+
+  Future<void> _fetchUserLocation() async {
+    final pos = await _workerLocationService.getUserPosition();
+    if (mounted) {
+      setState(() {
+        _currentPosition = pos;
+      });
+    }
   }
 
   @override
@@ -59,7 +76,7 @@ class _ExplorePageState extends State<ExplorePage> {
                     const SizedBox(height: 4),
 
                     Text(
-                      'Find trusted services and skilled workers near you.',
+                      'Find trusted services and active workers near your location.',
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: colorScheme.onSurfaceVariant,
                       ),
@@ -70,7 +87,12 @@ class _ExplorePageState extends State<ExplorePage> {
                     // Search Bar with Real-Time Filtering
                     _buildSearchBar(colorScheme),
 
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 16),
+
+                    // Distance Radius & Online Quick Filters Row
+                    _buildQuickFilters(colorScheme),
+
+                    const SizedBox(height: 16),
 
                     // Emergency CTA (show only when not actively searching)
                     if (_searchQuery.isEmpty && _selectedCategory == null) ...[
@@ -160,7 +182,7 @@ class _ExplorePageState extends State<ExplorePage> {
                   if (filteredDocs.isEmpty) {
                     return SliverToBoxAdapter(
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 30),
+                        padding: const EdgeInsets.symmetric(vertical: 24),
                         child: Center(
                           child: Text(
                             'No services match "$_searchQuery"',
@@ -214,13 +236,27 @@ class _ExplorePageState extends State<ExplorePage> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      _searchQuery.isNotEmpty
-                          ? 'Matching Workers'
-                          : 'Nearby Workers',
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                    Row(
+                      children: [
+                        Text(
+                          _searchQuery.isNotEmpty
+                              ? 'Matching Workers'
+                              : 'Online Workers Nearby',
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        if (_onlyOnline)
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: const BoxDecoration(
+                              color: Colors.green,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                      ],
                     ),
                     TextButton(
                       onPressed: () {
@@ -233,14 +269,17 @@ class _ExplorePageState extends State<ExplorePage> {
               ),
             ),
 
-            // Live Workers from Firestore
+            // Live Workers from Firestore with Geolocation & Online filter
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
-              sliver: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                stream: FirebaseFirestore.instance
-                    .collection('workers')
-                    .where('isActive', isEqualTo: true)
-                    .snapshots(),
+              sliver: StreamBuilder<List<WorkerModel>>(
+                stream: _workerLocationService.streamNearbyOnlineWorkers(
+                  userPosition: _currentPosition,
+                  radiusKm: _selectedRadiusKm,
+                  onlyOnline: _onlyOnline,
+                  categoryFilter: _selectedCategory,
+                  searchQuery: _searchQuery,
+                ),
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return const SliverToBoxAdapter(
@@ -251,40 +290,20 @@ class _ExplorePageState extends State<ExplorePage> {
                     );
                   }
 
-                  final allWorkers = snapshot.data?.docs ?? [];
+                  final workers = snapshot.data ?? [];
 
-                  final filteredWorkers = allWorkers.where((doc) {
-                    final data = doc.data();
-                    final name = (data['name']?.toString() ?? '').toLowerCase();
-                    final profession = (data['profession']?.toString() ?? '').toLowerCase();
-                    final city = (data['city']?.toString() ?? '').toLowerCase();
-                    final skills = (data['skills'] is List)
-                        ? (data['skills'] as List).map((e) => e.toString().toLowerCase()).toList()
-                        : <String>[];
-
-                    if (_selectedCategory != null) {
-                      final catMatch = profession.contains(_selectedCategory!.toLowerCase()) ||
-                          skills.any((s) => s.contains(_selectedCategory!.toLowerCase()));
-                      if (!catMatch) return false;
-                    }
-
-                    if (_searchQuery.isNotEmpty) {
-                      final match = name.contains(_searchQuery) ||
-                          profession.contains(_searchQuery) ||
-                          city.contains(_searchQuery) ||
-                          skills.any((s) => s.contains(_searchQuery));
-                      if (!match) return false;
-                    }
-
-                    return true;
-                  }).toList();
-
-                  if (filteredWorkers.isEmpty) {
+                  if (workers.isEmpty) {
                     return SliverToBoxAdapter(
                       child: _EmptyWorkersCard(
                         message: _searchQuery.isNotEmpty
-                            ? 'No workers match "$_searchQuery"'
-                            : 'No verified workers found in this category.',
+                            ? 'No online workers match "$_searchQuery" within ${_selectedRadiusKm.toInt()} km.'
+                            : 'No active workers found within ${_selectedRadiusKm >= 100 ? "your area" : "${_selectedRadiusKm.toInt()} km"}.',
+                        onExpandRadius: () {
+                          setState(() {
+                            _selectedRadiusKm = 9999.0;
+                            _onlyOnline = false;
+                          });
+                        },
                       ),
                     );
                   }
@@ -292,18 +311,16 @@ class _ExplorePageState extends State<ExplorePage> {
                   return SliverList(
                     delegate: SliverChildBuilderDelegate(
                       (context, index) {
-                        final doc = filteredWorkers[index];
-                        final data = doc.data();
+                        final worker = workers[index];
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 12),
                           child: _WorkerCard(
-                            id: doc.id,
-                            data: data,
-                            onTap: () => _showWorkerSheet(context, doc.id, data),
+                            worker: worker,
+                            onTap: () => _showWorkerSheet(context, worker),
                           ),
                         );
                       },
-                      childCount: filteredWorkers.length,
+                      childCount: workers.length,
                     ),
                   );
                 },
@@ -313,6 +330,87 @@ class _ExplorePageState extends State<ExplorePage> {
             const SliverToBoxAdapter(child: SizedBox(height: 32)),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildQuickFilters(ColorScheme colorScheme) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          // Online Only Toggle Chip
+          FilterChip(
+            selected: _onlyOnline,
+            label: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: _onlyOnline ? Colors.greenAccent : Colors.grey,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                const Text('Online Now', style: TextStyle(fontSize: 12)),
+              ],
+            ),
+            onSelected: (val) {
+              setState(() => _onlyOnline = val);
+            },
+            showCheckmark: false,
+            selectedColor: colorScheme.primary,
+            labelStyle: TextStyle(
+              color: _onlyOnline ? colorScheme.onPrimary : colorScheme.onSurface,
+              fontWeight: _onlyOnline ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
+          const SizedBox(width: 8),
+
+          // Distance Radius Selector Chips
+          ...[5.0, 10.0, 25.0, 50.0].map((radius) {
+            final isSelected = _selectedRadiusKm == radius;
+            return Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: FilterChip(
+                selected: isSelected,
+                label: Text(
+                  '${radius.toInt()} km',
+                  style: const TextStyle(fontSize: 12),
+                ),
+                onSelected: (val) {
+                  setState(() => _selectedRadiusKm = radius);
+                },
+                showCheckmark: false,
+                selectedColor: colorScheme.primary,
+                labelStyle: TextStyle(
+                  color: isSelected ? colorScheme.onPrimary : colorScheme.onSurface,
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                ),
+              ),
+            );
+          }),
+
+          // All Distance Chip
+          FilterChip(
+            selected: _selectedRadiusKm >= 100.0,
+            label: const Text('All Distance', style: TextStyle(fontSize: 12)),
+            onSelected: (val) {
+              setState(() => _selectedRadiusKm = 9999.0);
+            },
+            showCheckmark: false,
+            selectedColor: colorScheme.primary,
+            labelStyle: TextStyle(
+              color: _selectedRadiusKm >= 100.0
+                  ? colorScheme.onPrimary
+                  : colorScheme.onSurface,
+              fontWeight:
+                  _selectedRadiusKm >= 100.0 ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -365,32 +463,12 @@ class _ExplorePageState extends State<ExplorePage> {
     );
   }
 
-  void _showWorkerSheet(
-    BuildContext context,
-    String workerId,
-    Map<String, dynamic> data,
-  ) {
-    final item = SearchResultItem(
-      id: workerId,
-      type: SearchItemType.worker,
-      title: data['name']?.toString() ?? 'Worker',
-      subtitle: data['profession']?.toString() ?? 'Professional',
-      description: data['bio']?.toString() ?? data['about']?.toString() ?? '',
-      imageUrl: data['profileImage']?.toString() ?? data['avatar']?.toString(),
-      rating: (data['rating'] as num?)?.toDouble() ?? 4.8,
-      totalJobsOrReviews: (data['totalJobs'] as num?)?.toInt() ?? 0,
-      price: (data['hourlyRate'] as num?)?.toInt() ?? 299,
-      tags: (data['skills'] is List)
-          ? (data['skills'] as List).map((e) => e.toString()).toList()
-          : [],
-      rawData: data,
-    );
-
+  void _showWorkerSheet(BuildContext context, WorkerModel worker) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _WorkerDetailModal(item: item),
+      builder: (_) => _WorkerDetailModal(worker: worker),
     );
   }
 }
@@ -553,13 +631,11 @@ class _CategoryCard extends StatelessWidget {
 // -----------------------------------------------------------------------------
 
 class _WorkerCard extends StatelessWidget {
-  final String id;
-  final Map<String, dynamic> data;
+  final WorkerModel worker;
   final VoidCallback onTap;
 
   const _WorkerCard({
-    required this.id,
-    required this.data,
+    required this.worker,
     required this.onTap,
   });
 
@@ -567,13 +643,6 @@ class _WorkerCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-
-    final name = data['name']?.toString() ?? 'Verified Worker';
-    final profession = data['profession']?.toString() ?? 'Professional';
-    final rating = (data['rating'] as num?)?.toDouble() ?? 4.8;
-    final totalJobs = (data['totalJobs'] as num?)?.toInt() ?? 50;
-    final hourlyRate = (data['hourlyRate'] as num?)?.toInt() ?? 299;
-    final imageUrl = data['profileImage']?.toString() ?? data['avatar']?.toString();
 
     return Material(
       color: colorScheme.surface,
@@ -590,20 +659,44 @@ class _WorkerCard extends StatelessWidget {
             ),
           ),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CircleAvatar(
-                radius: 26,
-                backgroundColor: colorScheme.primaryContainer,
-                backgroundImage: imageUrl != null ? NetworkImage(imageUrl) : null,
-                child: imageUrl == null
-                    ? Text(
-                        name.isNotEmpty ? name[0] : 'W',
-                        style: TextStyle(
-                          color: colorScheme.onPrimaryContainer,
-                          fontWeight: FontWeight.bold,
+              Stack(
+                children: [
+                  CircleAvatar(
+                    radius: 26,
+                    backgroundColor: colorScheme.primaryContainer,
+                    backgroundImage: worker.profileImage != null
+                        ? NetworkImage(worker.profileImage!)
+                        : null,
+                    child: worker.profileImage == null
+                        ? Text(
+                            worker.name.isNotEmpty ? worker.name[0] : 'W',
+                            style: TextStyle(
+                              color: colorScheme.onPrimaryContainer,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          )
+                        : null,
+                  ),
+                  if (worker.isOnline)
+                    Positioned(
+                      bottom: 0,
+                      right: 0,
+                      child: Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: Colors.green,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: colorScheme.surface,
+                            width: 2,
+                          ),
                         ),
-                      )
-                    : null,
+                      ),
+                    ),
+                ],
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -613,11 +706,27 @@ class _WorkerCard extends StatelessWidget {
                     Row(
                       children: [
                         Expanded(
-                          child: Text(
-                            name,
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
+                          child: Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  worker.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                              if (worker.isVerified) ...[
+                                const SizedBox(width: 4),
+                                const Icon(
+                                  Icons.verified_rounded,
+                                  size: 15,
+                                  color: Colors.blue,
+                                ),
+                              ],
+                            ],
                           ),
                         ),
                         Container(
@@ -639,7 +748,7 @@ class _WorkerCard extends StatelessWidget {
                               ),
                               const SizedBox(width: 3),
                               Text(
-                                rating.toStringAsFixed(1),
+                                worker.rating.toStringAsFixed(1),
                                 style: const TextStyle(
                                   fontWeight: FontWeight.w700,
                                   fontSize: 12,
@@ -653,7 +762,7 @@ class _WorkerCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      profession,
+                      worker.profession,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: colorScheme.primary,
                         fontWeight: FontWeight.w600,
@@ -662,31 +771,56 @@ class _WorkerCard extends StatelessWidget {
                     const SizedBox(height: 6),
                     Row(
                       children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.location_on_rounded,
+                                size: 12,
+                                color: colorScheme.primary,
+                              ),
+                              const SizedBox(width: 2),
+                              Text(
+                                worker.formattedDistance,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: colorScheme.onSurface,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
                         Icon(
                           Icons.work_outline_rounded,
                           size: 13,
                           color: colorScheme.onSurfaceVariant,
                         ),
-                        const SizedBox(width: 4),
+                        const SizedBox(width: 3),
                         Text(
-                          '$totalJobs jobs',
+                          '${worker.completedJobs} jobs',
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: colorScheme.onSurfaceVariant,
                             fontSize: 11,
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        Icon(
-                          Icons.currency_rupee_rounded,
-                          size: 13,
-                          color: colorScheme.onSurfaceVariant,
-                        ),
+                        const Spacer(),
                         Text(
-                          '$hourlyRate/hr',
+                          '₹${worker.hourlyRate}/hr',
                           style: theme.textTheme.bodySmall?.copyWith(
-                            color: colorScheme.onSurfaceVariant,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 11,
+                            color: colorScheme.primary,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12,
                           ),
                         ),
                       ],
@@ -708,9 +842,11 @@ class _WorkerCard extends StatelessWidget {
 
 class _EmptyWorkersCard extends StatelessWidget {
   final String message;
+  final VoidCallback? onExpandRadius;
 
   const _EmptyWorkersCard({
     this.message = 'Nearby verified workers will appear here.',
+    this.onExpandRadius,
   });
 
   @override
@@ -738,7 +874,7 @@ class _EmptyWorkersCard extends StatelessWidget {
           const SizedBox(height: 12),
 
           Text(
-            'Workers near you',
+            'No Workers in Radius',
             style: theme.textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.w700,
             ),
@@ -753,6 +889,14 @@ class _EmptyWorkersCard extends StatelessWidget {
               color: colorScheme.onSurfaceVariant,
             ),
           ),
+
+          if (onExpandRadius != null) ...[
+            const SizedBox(height: 12),
+            FilledButton.tonal(
+              onPressed: onExpandRadius,
+              child: const Text('Show All Workers'),
+            ),
+          ],
         ],
       ),
     );
@@ -764,9 +908,9 @@ class _EmptyWorkersCard extends StatelessWidget {
 // -----------------------------------------------------------------------------
 
 class _WorkerDetailModal extends StatelessWidget {
-  final SearchResultItem item;
+  final WorkerModel worker;
 
-  const _WorkerDetailModal({required this.item});
+  const _WorkerDetailModal({required this.worker});
 
   @override
   Widget build(BuildContext context) {
@@ -805,12 +949,12 @@ class _WorkerDetailModal extends StatelessWidget {
               CircleAvatar(
                 radius: 30,
                 backgroundColor: colorScheme.primaryContainer,
-                backgroundImage: item.imageUrl != null
-                    ? NetworkImage(item.imageUrl!)
+                backgroundImage: worker.profileImage != null
+                    ? NetworkImage(worker.profileImage!)
                     : null,
-                child: item.imageUrl == null
+                child: worker.profileImage == null
                     ? Text(
-                        item.title.isNotEmpty ? item.title[0] : 'W',
+                        worker.name.isNotEmpty ? worker.name[0] : 'W',
                         style: TextStyle(
                           fontSize: 22,
                           color: colorScheme.onPrimaryContainer,
@@ -824,18 +968,41 @@ class _WorkerDetailModal extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      item.title,
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            worker.name,
+                            style: theme.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        if (worker.isVerified) ...[
+                          const SizedBox(width: 4),
+                          const Icon(
+                            Icons.verified_rounded,
+                            size: 18,
+                            color: Colors.blue,
+                          ),
+                        ],
+                      ],
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      item.subtitle,
+                      worker.profession,
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: colorScheme.primary,
                         fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '• ${worker.formattedDistance}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                   ],
@@ -846,7 +1013,25 @@ class _WorkerDetailModal extends StatelessWidget {
 
           const SizedBox(height: 18),
 
-          if (item.tags.isNotEmpty) ...[
+          if (worker.bio != null && worker.bio!.isNotEmpty) ...[
+            Text(
+              'About Professional',
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              worker.bio!,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+
+          if (worker.skills.isNotEmpty) ...[
             Text(
               'Skills & Services',
               style: theme.textTheme.titleSmall?.copyWith(
@@ -857,7 +1042,7 @@ class _WorkerDetailModal extends StatelessWidget {
             Wrap(
               spacing: 6,
               runSpacing: 6,
-              children: item.tags.map((tag) {
+              children: worker.skills.map((tag) {
                 return Chip(
                   label: Text(tag, style: const TextStyle(fontSize: 12)),
                   backgroundColor:
@@ -882,7 +1067,7 @@ class _WorkerDetailModal extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      '₹${item.price ?? 299}',
+                      '₹${worker.hourlyRate}',
                       style: theme.textTheme.headlineSmall?.copyWith(
                         fontWeight: FontWeight.w800,
                         color: colorScheme.primary,
@@ -925,18 +1110,21 @@ class _WorkerDetailModal extends StatelessWidget {
     }
 
     try {
-      final bookingRef = await FirebaseFirestore.instance.collection('bookings').add({
+      final bookingRef =
+          await FirebaseFirestore.instance.collection('bookings').add({
         'customerId': user.uid,
         'customerName': user.displayName ?? 'Customer',
         'customerPhone': user.phoneNumber ?? '',
-        'workerId': item.id,
-        'workerName': item.title,
+        'workerId': worker.id,
+        'workerName': worker.name,
         'serviceId': 'service_direct',
-        'serviceTitle': item.subtitle,
+        'serviceTitle': worker.profession,
         'status': 'requested',
-        'scheduledDate': Timestamp.fromDate(DateTime.now().add(const Duration(days: 1))),
+        'scheduledDate': Timestamp.fromDate(
+          DateTime.now().add(const Duration(days: 1)),
+        ),
         'timeSlot': '11:00 AM - 01:00 PM',
-        'amount': item.price ?? 299,
+        'amount': worker.hourlyRate,
         'notes': 'Direct booking via Explore',
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
@@ -945,7 +1133,9 @@ class _WorkerDetailModal extends StatelessWidget {
       nav.pop();
       messenger.showSnackBar(
         SnackBar(
-          content: Text('Hiring request sent! Ref: ${bookingRef.id.substring(0, 6)}'),
+          content: Text(
+            'Hiring request sent! Ref: ${bookingRef.id.substring(0, 6)}',
+          ),
           backgroundColor: Colors.green.shade700,
           action: SnackBarAction(
             label: 'View Activity',
