@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -9,27 +10,15 @@ class HomeServices extends StatelessWidget {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
-    final services = [
-      const _ServiceItem(title: 'Plumbing', icon: Icons.plumbing_rounded),
-      const _ServiceItem(
-        title: 'Electrician',
-        icon: Icons.electrical_services_rounded,
-      ),
-      const _ServiceItem(
-        title: 'Cleaning',
-        icon: Icons.cleaning_services_rounded,
-      ),
-      const _ServiceItem(title: 'Carpenter', icon: Icons.handyman_rounded),
-      const _ServiceItem(title: 'Painting', icon: Icons.format_paint_rounded),
-      const _ServiceItem(title: 'Mechanic', icon: Icons.car_repair_rounded),
-    ];
-
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 24, 20, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
+          // ----------------------------------------------------------
+          // HEADER
+          // ----------------------------------------------------------
+
           Row(
             children: [
               Expanded(
@@ -56,10 +45,7 @@ class HomeServices extends StatelessWidget {
 
               TextButton(
                 onPressed: () {
-                  // Navigate to all services
-                          context.go('/explore');
-
-
+                  context.go('/explore');
                 },
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -85,25 +71,80 @@ class HomeServices extends StatelessWidget {
 
           const SizedBox(height: 16),
 
-          // 3 x 2 Grid
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: services.length,
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-              childAspectRatio: 0.95,
-            ),
-            itemBuilder: (context, index) {
-              final service = services[index];
+          // ----------------------------------------------------------
+          // FIRESTORE
+          // ----------------------------------------------------------
+          StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: FirebaseFirestore.instance
+                .collection('services')
+                .where('isActive', isEqualTo: true)
+                .snapshots(),
 
-              return _ServiceCard(
-                service: service,
-                onTap: () {
-                  // Navigate to service details
+            builder: (context, snapshot) {
+              // Loading
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const SizedBox(
+                  height: 180,
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
 
+              // Error
+              if (snapshot.hasError) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Text(
+                      'Unable to load services',
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                  ),
+                );
+              }
+
+              final documents = snapshot.data?.docs ?? [];
+
+              // Empty
+              if (documents.isEmpty) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Text(
+                      'No services available',
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                  ),
+                );
+              }
+
+              // Convert Firestore documents
+              final services = documents
+                  .map((doc) => _ServiceItem.fromFirestore(doc.id, doc.data()))
+                  .toList();
+
+              // Home shows maximum 6 services
+              final homeServices = services.take(6).toList();
+
+              return GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: homeServices.length,
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: 0.95,
+                ),
+                itemBuilder: (context, index) {
+                  final service = homeServices[index];
+
+                  return _ServiceCard(
+                    service: service,
+                    onTap: () {
+                      // Later:
+                      // context.push('/service/${service.id}');
+                    },
+                  );
                 },
               );
             },
@@ -114,20 +155,79 @@ class HomeServices extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------
+// ============================================================
 // MODEL
-// ------------------------------------------------------------
+// ============================================================
 
 class _ServiceItem {
+  final String id;
   final String title;
-  final IconData icon;
+  final String description;
+  final String iconName;
+  final String category;
+  final int basePrice;
 
-  const _ServiceItem({required this.title, required this.icon});
+  const _ServiceItem({
+    required this.id,
+    required this.title,
+    required this.description,
+    required this.iconName,
+    required this.category,
+    required this.basePrice,
+  });
+
+  factory _ServiceItem.fromFirestore(String id, Map<String, dynamic> data) {
+    return _ServiceItem(
+      id: id,
+      title: data['name']?.toString() ?? 'Service',
+      description: data['description']?.toString() ?? '',
+      iconName: data['icon']?.toString() ?? 'handyman_rounded',
+      category: data['category']?.toString() ?? '',
+      basePrice: (data['basePrice'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  IconData get icon {
+    switch (iconName) {
+      case 'plumbing_rounded':
+        return Icons.plumbing_rounded;
+
+      case 'electrical_services_rounded':
+        return Icons.electrical_services_rounded;
+
+      case 'cleaning_services_rounded':
+        return Icons.cleaning_services_rounded;
+
+      case 'handyman_rounded':
+        return Icons.handyman_rounded;
+
+      case 'format_paint_rounded':
+        return Icons.format_paint_rounded;
+
+      case 'car_repair_rounded':
+        return Icons.car_repair_rounded;
+
+      case 'ac_unit_rounded':
+        return Icons.ac_unit_rounded;
+
+      case 'home_repair_service_rounded':
+        return Icons.home_repair_service_rounded;
+
+      case 'elderly_rounded':
+        return Icons.elderly_rounded;
+
+      case 'yard_rounded':
+        return Icons.yard_rounded;
+
+      default:
+        return Icons.home_repair_service_rounded;
+    }
+  }
 }
 
-// ------------------------------------------------------------
-// CARD
-// ------------------------------------------------------------
+// ============================================================
+// SERVICE CARD
+// ============================================================
 
 class _ServiceCard extends StatelessWidget {
   final _ServiceItem service;
@@ -150,14 +250,13 @@ class _ServiceCard extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
             border: Border.all(
-              color: colorScheme.outlineVariant.withOpacity(0.45),
+              color: colorScheme.outlineVariant.withValues(alpha: 0.45),
             ),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Icon
               Container(
                 width: 48,
                 height: 48,
@@ -170,7 +269,6 @@ class _ServiceCard extends StatelessWidget {
 
               const SizedBox(height: 10),
 
-              // Name
               Text(
                 service.title,
                 maxLines: 1,

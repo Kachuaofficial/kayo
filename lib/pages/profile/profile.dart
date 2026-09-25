@@ -1,4 +1,7 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:kayo/services/authentication.dart';
+import 'package:kayo/services/firestore_seeder.dart';
 
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
@@ -7,6 +10,31 @@ class ProfilePage extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final user = FirebaseAuth.instance.currentUser;
+
+    final String fullName = () {
+      if (user == null) return 'Guest User';
+      if (user.displayName != null && user.displayName!.trim().isNotEmpty) {
+        return user.displayName!.trim();
+      }
+      if (user.email != null && user.email!.isNotEmpty) {
+        return user.email!.split('@').first;
+      }
+      return 'User';
+    }();
+
+    final String email = user?.email ?? 'user@example.com';
+
+    final String initials = () {
+      if (fullName.isNotEmpty) {
+        final parts = fullName.split(' ').where((p) => p.isNotEmpty).toList();
+        if (parts.length >= 2) {
+          return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+        }
+        return fullName[0].toUpperCase();
+      }
+      return 'U';
+    }();
 
     return Scaffold(
       backgroundColor: colorScheme.surface,
@@ -26,18 +54,31 @@ class ProfilePage extends StatelessWidget {
                       decoration: BoxDecoration(
                         color: colorScheme.primaryContainer,
                         shape: BoxShape.circle,
+                        image: user?.photoURL != null
+                            ? DecorationImage(
+                                image: NetworkImage(user!.photoURL!),
+                                fit: BoxFit.cover,
+                              )
+                            : null,
                       ),
-                      child: Icon(
-                        Icons.person_rounded,
-                        size: 46,
-                        color: colorScheme.onPrimaryContainer,
-                      ),
+                      child: user?.photoURL == null
+                          ? Center(
+                              child: Text(
+                                initials,
+                                style: TextStyle(
+                                  fontSize: 32,
+                                  fontWeight: FontWeight.w800,
+                                  color: colorScheme.onPrimaryContainer,
+                                ),
+                              ),
+                            )
+                          : null,
                     ),
 
                     const SizedBox(height: 14),
 
                     Text(
-                      'Shivam Mishra',
+                      fullName,
                       style: theme.textTheme.headlineSmall?.copyWith(
                         fontWeight: FontWeight.w700,
                       ),
@@ -46,7 +87,7 @@ class ProfilePage extends StatelessWidget {
                     const SizedBox(height: 4),
 
                     Text(
-                      'shivam@example.com',
+                      email,
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: colorScheme.onSurfaceVariant,
                       ),
@@ -138,6 +179,28 @@ class ProfilePage extends StatelessWidget {
 
             const SliverToBoxAdapter(child: SizedBox(height: 28)),
 
+            // Developer & Data Tools
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              sliver: SliverToBoxAdapter(
+                child: _Section(
+                  title: 'Developer & Data Tools',
+                  children: [
+                    _ProfileTile(
+                      icon: Icons.cloud_upload_outlined,
+                      title: 'Seed Demo Data',
+                      subtitle: 'Populate Firestore with users, workers, services & bookings',
+                      onTap: () {
+                        _showSeedDataDialog(context);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            const SliverToBoxAdapter(child: SizedBox(height: 28)),
+
             // Support
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -198,7 +261,7 @@ class ProfilePage extends StatelessWidget {
             SliverToBoxAdapter(
               child: Center(
                 child: Text(
-                  'LabourConnect • Version 1.0.0',
+                  'Savia • Version 1.0.0',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                   ),
@@ -210,6 +273,119 @@ class ProfilePage extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+
+  void _showSeedDataDialog(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.cloud_upload_rounded, color: Color(0xFF2563EB)),
+              SizedBox(width: 10),
+              Text('Seed Demo Data'),
+            ],
+          ),
+          content: const Text(
+            'This will populate your Firestore database with:\n\n'
+            '• 10 Users\n'
+            '• 20 Workers\n'
+            '• 10 Services\n'
+            '• 25 Bookings\n'
+            '• 25 Payments\n'
+            '• 15 Reviews\n'
+            '• 30 Notifications\n\n'
+            'Existing documents with matching IDs will be safely merged. Continue?',
+            style: TextStyle(height: 1.4),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: colorScheme.primary,
+              ),
+              icon: const Icon(Icons.play_arrow_rounded, size: 18),
+              label: const Text('Start Seeding'),
+              onPressed: () async {
+                Navigator.pop(dialogCtx);
+
+                if (!context.mounted) return;
+
+                // Show loading indicator
+                showDialog(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (_) => const AlertDialog(
+                    content: Row(
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(width: 20),
+                        Text('Populating Firestore...'),
+                      ],
+                    ),
+                  ),
+                );
+
+                try {
+                  final seeder = FirestoreSeeder();
+                  final stats = await seeder.seedAll();
+
+                  if (!context.mounted) return;
+                  Navigator.pop(context); // Dismiss loading
+
+                  showDialog(
+                    context: context,
+                    builder: (_) => AlertDialog(
+                      title: const Row(
+                        children: [
+                          Icon(Icons.check_circle_rounded, color: Color(0xFF059669)),
+                          SizedBox(width: 10),
+                          Text('Seeding Complete!'),
+                        ],
+                      ),
+                      content: Text(
+                        'Successfully populated Savia Firestore database:\n\n'
+                        '• Users: ${stats['users']}\n'
+                        '• Workers: ${stats['workers']}\n'
+                        '• Services: ${stats['services']}\n'
+                        '• Bookings: ${stats['bookings']}\n'
+                        '• Payments: ${stats['payments']}\n'
+                        '• Reviews: ${stats['reviews']}\n'
+                        '• Notifications: ${stats['notifications']}',
+                        style: const TextStyle(height: 1.4),
+                      ),
+                      actions: [
+                        FilledButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('Great!'),
+                        ),
+                      ],
+                    ),
+                  );
+                } catch (e) {
+                  if (!context.mounted) return;
+                  Navigator.pop(context); // Dismiss loading
+
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Seeding failed: $e'),
+                      backgroundColor: Colors.red.shade700,
+                    ),
+                  );
+                }
+              },
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -236,10 +412,17 @@ class ProfilePage extends StatelessWidget {
                 backgroundColor: colorScheme.error,
                 foregroundColor: colorScheme.onError,
               ),
-              onPressed: () {
+              onPressed: () async {
                 Navigator.pop(context);
-
-                // TODO: Logout
+                try {
+                  await AuthService().signOut();
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Failed to log out: $e')),
+                    );
+                  }
+                }
               },
               child: const Text('Log out'),
             ),

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "102394890507",
+    "project_id": "savia-82257",
+    "storage_bucket": "savia-82257.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:102394890507:android:c156e7e8c0da4a05307a0e",
+        "android_client_info": {
+          "package_name": "com.invatech.kayo"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCOej8QYAq2zmzZ3kIeBflRLVazgyn8b6Q"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

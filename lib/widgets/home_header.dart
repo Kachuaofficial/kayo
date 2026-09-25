@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 class HomeHeader extends StatelessWidget {
   final String userName;
+  final String? photoUrl;
   final String location;
   final int notificationCount;
   final VoidCallback? onLocationTap;
@@ -9,6 +10,7 @@ class HomeHeader extends StatelessWidget {
   const HomeHeader({
     super.key,
     this.userName = 'Kaizen',
+    this.photoUrl,
     this.location = 'Getting location...',
     this.notificationCount = 3,
     this.onLocationTap,
@@ -32,13 +34,38 @@ class HomeHeader extends StatelessWidget {
               color: colorScheme.primaryContainer,
               shape: BoxShape.circle,
             ),
-            child: Icon(
-              Icons.person_rounded,
-              color: colorScheme.primary,
-              size: 26,
-            ),
-          ),
+            clipBehavior: Clip.antiAlias,
+            child: photoUrl != null && photoUrl!.isNotEmpty
+                ? Image.network(
+                    photoUrl!,
+                    width: 48,
+                    height: 48,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Icon(
+                        Icons.person_rounded,
+                        color: colorScheme.primary,
+                        size: 26,
+                      );
+                    },
+                    loadingBuilder: (context, child, loadingProgress) {
+                      if (loadingProgress == null) {
+                        return child;
+                      }
 
+                      return Icon(
+                        Icons.person_rounded,
+                        color: colorScheme.primary,
+                        size: 26,
+                      );
+                    },
+                  )
+                : Icon(
+                    Icons.person_rounded,
+                    color: colorScheme.primary,
+                    size: 26,
+                  ),
+          ),
           const SizedBox(width: 14),
 
           // User Information
@@ -140,7 +167,7 @@ class _NotificationButton extends StatelessWidget {
       clipBehavior: Clip.none,
       children: [
         Material(
-          color: colorScheme.surfaceContainerHighest.withOpacity(0.55),
+          color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.55),
           shape: const CircleBorder(),
           child: InkWell(
             onTap: onPressed,

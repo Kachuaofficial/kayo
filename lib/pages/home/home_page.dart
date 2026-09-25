@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:kayo/widgets/home_banner.dart';
 import 'package:kayo/widgets/home_search.dart';
@@ -80,13 +81,25 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    final String greetingName = () {
+      if (user?.displayName?.trim().isNotEmpty == true) {
+        return user!.displayName!.trim().split(' ').first;
+      }
+      if (user?.email?.isNotEmpty == true) {
+        return user!.email!.split('@').first;
+      }
+      return 'Friend';
+    }();
+
     return Scaffold(
       body: SafeArea(
         child: SingleChildScrollView(
           child: Column(
             children: [
               HomeHeader(
-                userName: 'Kaizen',
+                userName: greetingName,
+                photoUrl: user?.photoURL,
                 location: _location,
                 notificationCount: 3,
                 onLocationTap: _handleLocationTap,

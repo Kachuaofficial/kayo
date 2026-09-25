@@ -1,59 +1,35 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:kayo/widgets/home_search.dart';
+import 'package:go_router/go_router.dart';
+import '../../services/firestore_search_service.dart';
 
-class ServicesPage extends StatelessWidget {
+class ServicesPage extends StatefulWidget {
   const ServicesPage({super.key});
 
-  static const List<_ServiceItem> services = [
-    _ServiceItem(
-      name: 'Plumbing',
-      icon: Icons.plumbing_rounded,
-    ),
-    _ServiceItem(
-      name: 'Electrician',
-      icon: Icons.electrical_services_rounded,
-    ),
-    _ServiceItem(
-      name: 'Cleaning',
-      icon: Icons.cleaning_services_rounded,
-    ),
-    _ServiceItem(
-      name: 'Carpenter',
-      icon: Icons.handyman_rounded,
-    ),
-    _ServiceItem(
-      name: 'Painting',
-      icon: Icons.format_paint_rounded,
-    ),
-    _ServiceItem(
-      name: 'Mechanic',
-      icon: Icons.car_repair_rounded,
-    ),
-    _ServiceItem(
-      name: 'Gardening',
-      icon: Icons.yard_rounded,
-    ),
-    _ServiceItem(
-      name: 'Home Care',
-      icon: Icons.home_rounded,
-    ),
-    _ServiceItem(
-      name: 'Driver',
-      icon: Icons.drive_eta_rounded,
-    ),
-    _ServiceItem(
-      name: 'Appliance Repair',
-      icon: Icons.home_repair_service_rounded,
-    ),
-    _ServiceItem(
-      name: 'Pest Control',
-      icon: Icons.pest_control_rounded,
-    ),
-    _ServiceItem(
-      name: 'Painting & Decor',
-      icon: Icons.brush_rounded,
-    ),
-  ];
+  @override
+  State<ServicesPage> createState() => _ServicesPageState();
+}
+
+class _ServicesPageState extends State<ServicesPage> {
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController.addListener(() {
+      setState(() {
+        _searchQuery = _searchController.text.trim().toLowerCase();
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -73,92 +49,199 @@ class ServicesPage extends StatelessWidget {
           ),
         ),
         centerTitle: false,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.search_rounded),
+            onPressed: () => context.push('/search'),
+            tooltip: 'Advanced Search',
+          ),
+        ],
       ),
       body: SafeArea(
         child: CustomScrollView(
           slivers: [
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
               sliver: SliverToBoxAdapter(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const HomeSearch(),
+                    // Search Bar
+                    Container(
+                      decoration: BoxDecoration(
+                        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.55),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: colorScheme.outlineVariant.withValues(alpha: 0.35),
+                        ),
+                      ),
+                      child: TextField(
+                        controller: _searchController,
+                        decoration: InputDecoration(
+                          hintText: 'Search any service...',
+                          hintStyle: TextStyle(
+                            color: colorScheme.onSurfaceVariant,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w400,
+                          ),
+                          prefixIcon: Icon(
+                            Icons.search_rounded,
+                            color: colorScheme.primary,
+                            size: 24,
+                          ),
+                          suffixIcon: _searchQuery.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.close_rounded, size: 20),
+                                  onPressed: () => _searchController.clear(),
+                                )
+                              : IconButton(
+                                  icon: const Icon(Icons.tune_rounded),
+                                  onPressed: () => context.push('/search'),
+                                ),
+                          border: InputBorder.none,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 14,
+                          ),
+                        ),
+                      ),
+                    ),
 
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 20),
 
                     Text(
-                      'What do you need help with?',
+                      _searchQuery.isNotEmpty
+                          ? 'Matching Services'
+                          : 'What do you need help with?',
                       style: theme.textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.w700,
                       ),
                     ),
 
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 4),
 
                     Text(
-                      'Choose a service and find trusted workers near you.',
+                      'Choose a service to find verified professionals near you.',
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: colorScheme.onSurfaceVariant,
                       ),
                     ),
 
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 16),
                   ],
                 ),
               ),
             ),
 
+            // Live Firestore Services Grid
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              sliver: SliverGrid(
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final service = services[index];
-
-                    return _ServiceCard(
-                      service: service,
-                      onTap: () {
-                        // TODO: Navigate to service details
-                      },
+              sliver: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: FirebaseFirestore.instance
+                    .collection('services')
+                    .where('isActive', isEqualTo: true)
+                    .snapshots(),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const SliverToBoxAdapter(
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(vertical: 40),
+                        child: Center(child: CircularProgressIndicator()),
+                      ),
                     );
-                  },
-                  childCount: services.length,
-                ),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                  childAspectRatio: 0.95,
-                ),
+                  }
+
+                  if (snapshot.hasError) {
+                    return SliverToBoxAdapter(
+                      child: Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Text('Unable to load services from Firestore: ${snapshot.error}'),
+                        ),
+                      ),
+                    );
+                  }
+
+                  final docs = snapshot.data?.docs ?? [];
+                  final filteredDocs = docs.where((doc) {
+                    final data = doc.data();
+                    final name = (data['name']?.toString() ?? '').toLowerCase();
+                    final desc = (data['description']?.toString() ?? '').toLowerCase();
+                    final cat = (data['category']?.toString() ?? '').toLowerCase();
+
+                    if (_searchQuery.isNotEmpty) {
+                      return name.contains(_searchQuery) ||
+                          desc.contains(_searchQuery) ||
+                          cat.contains(_searchQuery);
+                    }
+                    return true;
+                  }).toList();
+
+                  if (filteredDocs.isEmpty) {
+                    return SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 40),
+                        child: Center(
+                          child: Text(
+                            'No services match "$_searchQuery"',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+
+                  return SliverGrid(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) {
+                        final doc = filteredDocs[index];
+                        final item = SearchResultItem.fromServiceDoc(doc);
+
+                        return _ServiceGridCard(
+                          item: item,
+                          onTap: () => _showServiceDetail(context, item),
+                        );
+                      },
+                      childCount: filteredDocs.length,
+                    ),
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 3,
+                      crossAxisSpacing: 12,
+                      mainAxisSpacing: 12,
+                      childAspectRatio: 0.95,
+                    ),
+                  );
+                },
               ),
             ),
 
             const SliverToBoxAdapter(
-              child: SizedBox(height: 24),
+              child: SizedBox(height: 32),
             ),
           ],
         ),
       ),
     );
   }
+
+  void _showServiceDetail(BuildContext context, SearchResultItem item) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _ServiceBookingSheet(item: item),
+    );
+  }
 }
 
-class _ServiceItem {
-  final String name;
-  final IconData icon;
-
-  const _ServiceItem({
-    required this.name,
-    required this.icon,
-  });
-}
-class _ServiceCard extends StatelessWidget {
-  final _ServiceItem service;
+class _ServiceGridCard extends StatelessWidget {
+  final SearchResultItem item;
   final VoidCallback onTap;
 
-  const _ServiceCard({
-    required this.service,
+  const _ServiceGridCard({
+    required this.item,
     required this.onTap,
   });
 
@@ -182,7 +265,7 @@ class _ServiceCard extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
             border: Border.all(
-              color: colorScheme.outlineVariant,
+              color: colorScheme.outlineVariant.withValues(alpha: 0.6),
             ),
           ),
           child: Column(
@@ -196,7 +279,7 @@ class _ServiceCard extends StatelessWidget {
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
-                  service.icon,
+                  item.icon,
                   size: 24,
                   color: colorScheme.onPrimaryContainer,
                 ),
@@ -205,7 +288,7 @@ class _ServiceCard extends StatelessWidget {
               const SizedBox(height: 8),
 
               Text(
-                service.name,
+                item.title,
                 textAlign: TextAlign.center,
                 maxLines: 1,
                 softWrap: false,
@@ -219,5 +302,195 @@ class _ServiceCard extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+class _ServiceBookingSheet extends StatelessWidget {
+  final SearchResultItem item;
+
+  const _ServiceBookingSheet({required this.item});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      padding: EdgeInsets.fromLTRB(
+        24,
+        12,
+        24,
+        MediaQuery.of(context).viewInsets.bottom + 28,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 36,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 20),
+              decoration: BoxDecoration(
+                color: colorScheme.outlineVariant,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+
+          Row(
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(
+                  item.icon,
+                  size: 30,
+                  color: colorScheme.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.title,
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      item.subtitle,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: colorScheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 18),
+
+          if (item.description != null && item.description!.isNotEmpty) ...[
+            Text(
+              'Service Overview',
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              item.description!,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Starting Price',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    Text(
+                      '₹${item.price ?? 299}',
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: colorScheme.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: FilledButton(
+                  onPressed: () => _handleBook(context),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  child: const Text(
+                    'Book Now',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handleBook(BuildContext context) async {
+    final user = FirebaseAuth.instance.currentUser;
+    final nav = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+
+    if (user == null) {
+      nav.pop();
+      context.go('/auth');
+      return;
+    }
+
+    try {
+      final docRef = await FirebaseFirestore.instance.collection('bookings').add({
+        'customerId': user.uid,
+        'customerName': user.displayName ?? 'Customer',
+        'customerPhone': user.phoneNumber ?? '',
+        'workerId': 'worker_001',
+        'workerName': 'Verified Savia Professional',
+        'serviceId': item.id,
+        'serviceTitle': item.title,
+        'status': 'requested',
+        'scheduledDate': Timestamp.fromDate(DateTime.now().add(const Duration(days: 1))),
+        'timeSlot': '10:00 AM - 12:00 PM',
+        'amount': item.price ?? 299,
+        'notes': 'Booked from Services Catalog',
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      nav.pop();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Booking placed successfully! Ref: ${docRef.id.substring(0, 6)}'),
+          backgroundColor: Colors.green.shade700,
+          action: SnackBarAction(
+            label: 'View Activity',
+            textColor: Colors.white,
+            onPressed: () => context.go('/activity'),
+          ),
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Failed to book: $e')),
+      );
+    }
   }
 }

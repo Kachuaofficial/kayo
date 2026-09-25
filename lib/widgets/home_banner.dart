@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 class HomeBanner extends StatelessWidget {
   final VoidCallback? onBookService;
@@ -21,13 +22,13 @@ class HomeBanner extends StatelessWidget {
             end: Alignment.bottomRight,
             colors: [
               colorScheme.primary,
-              colorScheme.primary.withOpacity(0.82),
+              colorScheme.primary.withValues(alpha: 0.82),
             ],
           ),
           borderRadius: BorderRadius.circular(24),
           boxShadow: [
             BoxShadow(
-              color: colorScheme.primary.withOpacity(0.20),
+              color: colorScheme.primary.withValues(alpha: 0.20),
               blurRadius: 20,
               offset: const Offset(0, 8),
             ),
@@ -48,7 +49,7 @@ class HomeBanner extends StatelessWidget {
                       vertical: 5,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.18),
+                      color: Colors.white.withValues(alpha: 0.18),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: const Row(
@@ -89,7 +90,7 @@ class HomeBanner extends StatelessWidget {
                   Text(
                     'Book trusted workers for your everyday needs.',
                     style: theme.textTheme.bodyMedium?.copyWith(
-                      color: Colors.white.withOpacity(0.88),
+                      color: Colors.white.withValues(alpha: 0.88),
                       height: 1.4,
                     ),
                   ),
@@ -98,7 +99,7 @@ class HomeBanner extends StatelessWidget {
 
                   // CTA BUTTON
                   ElevatedButton(
-                    onPressed: onBookService,
+                    onPressed: onBookService ?? () => context.push('/search'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.white,
                       foregroundColor: colorScheme.primary,
@@ -111,21 +112,21 @@ class HomeBanner extends StatelessWidget {
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    child: const Row(
+                    child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
                           'Book a Service',
                           style: TextStyle(
                             fontWeight: FontWeight.w700,
-                            color: Colors.white,
+                            color: colorScheme.primary,
                           ),
                         ),
-                        SizedBox(width: 6),
+                        const SizedBox(width: 6),
                         Icon(
                           Icons.arrow_forward_rounded,
                           size: 17,
-                          color: Colors.white,
+                          color: colorScheme.primary,
                         ),
                       ],
                     ),
@@ -137,7 +138,7 @@ class HomeBanner extends StatelessWidget {
             const SizedBox(width: 8),
 
             // RIGHT ILLUSTRATION
-            Expanded(flex: 4, child: _BannerIllustration()),
+            const Expanded(flex: 4, child: _BannerIllustration()),
           ],
         ),
       ),
@@ -160,7 +161,7 @@ class _BannerIllustration extends StatelessWidget {
             width: 130,
             height: 130,
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.10),
+              color: Colors.white.withValues(alpha: 0.10),
               shape: BoxShape.circle,
             ),
           ),
@@ -170,10 +171,10 @@ class _BannerIllustration extends StatelessWidget {
             width: 88,
             height: 88,
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.15),
+              color: Colors.white.withValues(alpha: 0.15),
               shape: BoxShape.circle,
               border: Border.all(
-                color: Colors.white.withOpacity(0.20),
+                color: Colors.white.withValues(alpha: 0.20),
                 width: 1,
               ),
             ),
@@ -185,21 +186,21 @@ class _BannerIllustration extends StatelessWidget {
           ),
 
           // Floating service icon 1
-          Positioned(
+          const Positioned(
             top: 8,
             right: 2,
             child: _FloatingIcon(icon: Icons.plumbing_rounded),
           ),
 
           // Floating service icon 2
-          Positioned(
+          const Positioned(
             bottom: 12,
             left: 2,
             child: _FloatingIcon(icon: Icons.cleaning_services_rounded),
           ),
 
           // Floating service icon 3
-          Positioned(
+          const Positioned(
             bottom: 0,
             right: 14,
             child: _FloatingIcon(icon: Icons.electrical_services_rounded),

@@ -1,6 +1,26 @@
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 
+class LocationDetails {
+  final double? latitude;
+  final double? longitude;
+  final String? house;
+  final String? area;
+  final String? city;
+  final String? state;
+  final String? pincode;
+
+  const LocationDetails({
+    this.latitude,
+    this.longitude,
+    this.house,
+    this.area,
+    this.city,
+    this.state,
+    this.pincode,
+  });
+}
+
 class LocationService {
   final Geocoding _geocoding = Geocoding();
 
@@ -71,6 +91,59 @@ class LocationService {
     return 'Current location';
   }
 
+  /// Attempt to fetch complete location and address details safely
+  Future<LocationDetails?> getCurrentLocationDetails() async {
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) return null;
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        return null;
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.medium,
+          timeLimit: Duration(seconds: 4),
+        ),
+      );
+
+      final placemarks = await _geocoding.placemarkFromCoordinates(
+        position.latitude,
+        position.longitude,
+      );
+
+      if (placemarks.isEmpty) {
+        return LocationDetails(
+          latitude: position.latitude,
+          longitude: position.longitude,
+        );
+      }
+
+      final place = placemarks.first;
+      return LocationDetails(
+        latitude: position.latitude,
+        longitude: position.longitude,
+        house: place.street?.trim() ?? place.subThoroughfare?.trim() ?? '',
+        area: place.subLocality?.trim().isNotEmpty == true
+            ? place.subLocality!.trim()
+            : (place.thoroughfare?.trim() ?? ''),
+        city: place.locality?.trim().isNotEmpty == true
+            ? place.locality!.trim()
+            : (place.subAdministrativeArea?.trim() ?? ''),
+        state: place.administrativeArea?.trim() ?? '',
+        pincode: place.postalCode?.trim() ?? '',
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> openLocationSettings() async {
     await Geolocator.openLocationSettings();
   }
@@ -80,14 +153,11 @@ class LocationService {
   }
 }
 
-
 /// Location service is disabled.
 class LocationServiceDisabledException implements Exception {}
 
-
 /// User denied location permission.
 class LocationPermissionDeniedException implements Exception {}
-
 
 /// User permanently denied location permission.
 class LocationPermissionPermanentlyDeniedException
